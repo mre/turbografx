@@ -1,0 +1,15 @@
+[package]
+name = "turbografx"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# The HuC6280 (the CPU in the TurboGrafx-16 / PC Engine) is a 65C02 derivative.
+# We use the local `mos6502` crate, which has a dedicated `Huc6280` variant on
+# its `huc6280-variant` branch (MMU mapping registers, relocated zero
+# page/stack, remapped BRK vector and the extra opcodes).
+mos6502 = { path = "../mos6502" }
+log = "0.4"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
