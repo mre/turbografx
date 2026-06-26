@@ -88,6 +88,32 @@ const DCR_SATB_AUTO: u16 = 1 << 4; // repeat SATB DMA every vblank
 /// Maximum sprites that can be displayed on one scanline before overflow.
 const SPRITES_PER_LINE: usize = 16;
 
+/// A transient VDC event captured while tracing is enabled (see
+/// [`Vdc::set_trace`]). These are the events a boot/IRQ tracer cares about:
+/// the program arming a raster split, and the VDC actually raising the
+/// raster-compare and vertical-blank interrupts.
+#[derive(Clone, Copy, Debug)]
+pub struct VdcEvent {
+    /// Scanline the event happened on.
+    pub scanline: u16,
+    pub kind: VdcEventKind,
+}
+
+/// The kind of a captured [`VdcEvent`].
+#[derive(Clone, Copy, Debug)]
+pub enum VdcEventKind {
+    /// The raster-compare register (RCR) was set to a new value.
+    RcrWrite(u16),
+    /// The control register (CR) was set to a new value.
+    CrWrite(u16),
+    /// The line counter matched RCR, so the RR status bit was set. `irq` is
+    /// whether the raster-compare IRQ was enabled (and thus IRQ1 was raised).
+    RasterMatch { rcr: u16, irq: bool },
+    /// Vertical blank began, so the VD status bit was set. `irq` is whether the
+    /// vblank IRQ was enabled (and thus IRQ1 was raised).
+    Vblank { irq: bool },
+}
+
 #[derive(Clone)]
 pub struct Vdc {
     vram: Vec<u16>,
@@ -108,6 +134,14 @@ pub struct Vdc {
     bg_y: u16,
     /// Palette-index framebuffer (values 0..511, as fed to the VCE).
     pub framebuffer: Vec<u16>,
+    /// When set, transient events are appended to `events` for a tracer to
+    /// drain. Off by default and zero-cost when disabled.
+    trace_enabled: bool,
+    /// Captured events, drained via [`Vdc::drain_events`].
+    events: Vec<VdcEvent>,
+    /// Last RCR/CR values emitted as events, so we only log real changes.
+    traced_rcr: u16,
+    traced_cr: u16,
 }
 
 impl Default for Vdc {
@@ -129,6 +163,10 @@ impl Vdc {
             scanline: 0,
             bg_y: 0,
             framebuffer: vec![0; FB_WIDTH * FB_HEIGHT],
+            trace_enabled: false,
+            events: Vec::new(),
+            traced_rcr: 0,
+            traced_cr: 0,
         }
     }
 
@@ -186,6 +224,38 @@ impl Vdc {
             0x02 => self.write_register_low(value),
             // Data port high byte (commits VRAM writes / triggers DMA).
             _ => self.write_register_high(value),
+        }
+        if self.trace_enabled {
+            self.trace_register_write();
+        }
+    }
+
+    /// Emit an event when a traced register (RCR/CR) changes value, so a tracer
+    /// can see exactly when and to what the program arms a raster split or
+    /// flips the interrupt-enable / display-enable bits.
+    fn trace_register_write(&mut self) {
+        match self.selected {
+            REG_RCR => {
+                let value = self.registers[REG_RCR as usize] & 0x03FF;
+                if value != self.traced_rcr {
+                    self.traced_rcr = value;
+                    self.events.push(VdcEvent {
+                        scanline: self.scanline,
+                        kind: VdcEventKind::RcrWrite(value),
+                    });
+                }
+            }
+            REG_CR => {
+                let value = self.registers[REG_CR as usize];
+                if value != self.traced_cr {
+                    self.traced_cr = value;
+                    self.events.push(VdcEvent {
+                        scanline: self.scanline,
+                        kind: VdcEventKind::CrWrite(value),
+                    });
+                }
+            }
+            _ => {}
         }
     }
 
@@ -258,44 +328,85 @@ impl Vdc {
         }
     }
 
-    /// Advance the VDC by one scanline, updating raster interrupts and drawing.
+    /// Advance the VDC by one whole scanline (render, HBlank interrupts, then
+    /// advance). Equivalent to [`Vdc::render_current_line`] +
+    /// [`Vdc::enter_hblank`] + [`Vdc::advance_scanline`] run back to back.
     ///
-    /// Returns `true` when the frame wraps (the last scanline rolled over to 0)
-    /// so the caller can present a frame.
+    /// Returns `true` when the frame wraps (the last scanline rolled over to 0).
+    /// The console uses the three phases separately so it can run the CPU
+    /// *between* the active-display and HBlank phases; this convenience method
+    /// is handy for tests and tools that don't need that interleaving.
     pub fn step_scanline(&mut self) -> bool {
+        self.render_current_line();
+        self.enter_hblank();
+        self.advance_scanline()
+    }
+
+    /// Render the current scanline using the registers as latched at the start
+    /// of the line (i.e. as set during the previous line's HBlank).
+    pub fn render_current_line(&mut self) {
         // Latch the vertical-scroll counter at the top of the active display.
         if self.scanline == 0 {
             self.bg_y = self.registers[REG_BYR as usize] & 0x01FF;
         }
+        if self.scanline < VBLANK_LINE {
+            self.render_scanline(self.scanline as usize);
+            self.bg_y = self.bg_y.wrapping_add(1) & 0x01FF;
+        }
+    }
 
+    /// Enter horizontal blank for the current scanline: raise the raster-compare
+    /// interrupt (if this line matches RCR) and, on the first blank line, the
+    /// vertical-blank interrupt and any armed SATB DMA.
+    ///
+    /// The console calls this *after* running the active-display portion of the
+    /// line and *before* running the HBlank portion, so the CPU's interrupt
+    /// handler executes during HBlank and its register writes take effect on the
+    /// next line — exactly as on hardware.
+    pub fn enter_hblank(&mut self) {
         // Raster compare (RCR). The hardware compares the line counter offset by
         // 64; a match raises RR (and IRQ1 if enabled).
         let rcr = self.registers[REG_RCR as usize] & 0x03FF;
         if rcr >= 64 && self.scanline == rcr - 64 {
             self.status |= ST_RASTER;
-            if self.registers[REG_CR as usize] & CR_RASTER_IRQ != 0 {
+            let irq_enabled = self.registers[REG_CR as usize] & CR_RASTER_IRQ != 0;
+            if irq_enabled {
                 self.irq = true;
             }
-        }
-
-        // Render the active display lines.
-        if self.scanline < VBLANK_LINE {
-            self.render_scanline(self.scanline as usize);
-            self.bg_y = self.bg_y.wrapping_add(1) & 0x01FF;
+            if self.trace_enabled {
+                self.events.push(VdcEvent {
+                    scanline: self.scanline,
+                    kind: VdcEventKind::RasterMatch {
+                        rcr,
+                        irq: irq_enabled,
+                    },
+                });
+            }
         }
 
         // Entering vertical blank.
         if self.scanline == VBLANK_LINE {
             self.status |= ST_VBLANK;
-            if self.registers[REG_CR as usize] & CR_VBLANK_IRQ != 0 {
+            let irq_enabled = self.registers[REG_CR as usize] & CR_VBLANK_IRQ != 0;
+            if irq_enabled {
                 self.irq = true;
+            }
+            if self.trace_enabled {
+                self.events.push(VdcEvent {
+                    scanline: self.scanline,
+                    kind: VdcEventKind::Vblank { irq: irq_enabled },
+                });
             }
             // Auto-repeat SATB DMA if the game armed it.
             if self.registers[REG_DCR as usize] & DCR_SATB_AUTO != 0 {
                 self.run_satb_dma();
             }
         }
+    }
 
+    /// Advance to the next scanline. Returns `true` when the frame wraps (the
+    /// last scanline rolled over to 0) so the caller can present a frame.
+    pub fn advance_scanline(&mut self) -> bool {
         self.scanline += 1;
         if self.scanline >= crate::SCANLINES_PER_FRAME {
             self.scanline = 0;
@@ -515,9 +626,40 @@ impl Vdc {
         self.status
     }
 
+    /// The current Control register (CR) value, for debugging. Bit 7 = BG
+    /// enable, bit 6 = sprite enable, bits 0-3 = interrupt enables.
+    #[must_use]
+    pub const fn control(&self) -> u16 {
+        self.registers[REG_CR as usize]
+    }
+
     /// Direct VRAM access for debugging and tests.
     #[must_use]
     pub fn vram(&self) -> &[u16] {
         &self.vram
+    }
+
+    /// The raster-compare register (RCR), masked to its valid 10-bit range.
+    #[must_use]
+    pub const fn rcr(&self) -> u16 {
+        self.registers[REG_RCR as usize] & 0x03FF
+    }
+
+    /// Read any internal VDC register by index, for debugging.
+    #[must_use]
+    pub fn register(&self, index: usize) -> u16 {
+        self.registers.get(index).copied().unwrap_or(0)
+    }
+
+    /// Enable or disable transient event capture (see [`VdcEvent`]). Off by
+    /// default; enabling it lets a tracer observe RCR/CR writes and the
+    /// raster/vblank interrupts the VDC raises.
+    pub fn set_trace(&mut self, on: bool) {
+        self.trace_enabled = on;
+    }
+
+    /// Take and clear the events captured since the last drain.
+    pub fn drain_events(&mut self) -> Vec<VdcEvent> {
+        std::mem::take(&mut self.events)
     }
 }

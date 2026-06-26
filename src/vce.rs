@@ -81,6 +81,12 @@ impl Vce {
         self.control & 0x03
     }
 
+    /// The raw 9-bit color value of a palette entry, for debugging.
+    #[must_use]
+    pub fn color_raw(&self, entry: usize) -> u16 {
+        self.palette[entry % PALETTE_ENTRIES]
+    }
+
     /// Look up a palette entry and expand it to 0xAARRGGBB for a framebuffer.
     ///
     /// The 9-bit `0bGGG_RRR_BBB` value is scaled to 8 bits per channel.

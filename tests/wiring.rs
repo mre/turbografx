@@ -102,3 +102,71 @@ fn vdc_vblank_raises_irq_and_cpu_services_it() {
         "expected the vblank IRQ handler to run at least once, counter = {counter}"
     );
 }
+
+#[test]
+fn vdc_renders_a_background_tile() {
+    // Drive the VDC's ports directly (no CPU) to draw a single solid-colour tile
+    // in the top-left BAT cell, then render a frame and check the pixels.
+    let mut console = Console::new(Cartridge::from_bytes(vec![0u8; 0x2000]));
+    let bus = console.bus_mut();
+
+    // --- VCE: set BG palette 0, colour 1 to pure red (R=7) ----------------
+    // Colour table address = entry 1.
+    bus.vce.write(0x02, 0x01); // address low
+    bus.vce.write(0x03, 0x00); // address high
+    // 9-bit colour is 0bGGG_RRR_BBB; red = 0b000_111_000 = 0x38.
+    bus.vce.write(0x04, 0x38); // colour low
+    bus.vce.write(0x05, 0x00); // colour high
+
+    // Helper: select a VDC register.
+    let select = |bus: &mut turbografx::SystemBus, reg: u8| bus.vdc.write(0x00, reg);
+    // Helper: write a 16-bit value to the selected VDC register (data port).
+    let write_data = |bus: &mut turbografx::SystemBus, value: u16| {
+        bus.vdc.write(0x02, (value & 0xFF) as u8);
+        bus.vdc.write(0x03, (value >> 8) as u8);
+    };
+
+    // --- VRAM: tile pattern at char $100 (word address $1000) -------------
+    // All eight rows: plane0 = 0xFF (colour bit 0 set), other planes 0 -> every
+    // pixel is colour 1.
+    select(bus, 0x00); // MAWR
+    write_data(bus, 0x1000);
+    select(bus, 0x02); // VWR (auto-increments MAWR)
+    for _ in 0..8 {
+        write_data(bus, 0x00FF); // planes 0 & 1
+    }
+    for _ in 0..8 {
+        write_data(bus, 0x0000); // planes 2 & 3
+    }
+
+    // --- BAT entry 0 -> char $100, palette 0 ------------------------------
+    select(bus, 0x00); // MAWR
+    write_data(bus, 0x0000);
+    select(bus, 0x02); // VWR
+    write_data(bus, 0x0100);
+
+    // --- MWR = 32x32, CR = background enable ------------------------------
+    select(bus, 0x09); // MWR
+    write_data(bus, 0x0000);
+    select(bus, 0x05); // CR
+    write_data(bus, 0x0080); // BG enable (bit 7)
+
+    // Render one full frame straight from the VDC.
+    for _ in 0..turbografx::SCANLINES_PER_FRAME {
+        bus.vdc.step_scanline();
+    }
+
+    // Pixel (0,0) lies in BAT cell 0, so it should be the tile's red colour.
+    let (w, _h) = console.active_size();
+    let rgba = console.active_frame_rgba();
+    let px = &rgba[0..4];
+    assert_eq!(
+        (px[0], px[1], px[2]),
+        (255, 0, 0),
+        "top-left pixel should be the red BG tile"
+    );
+
+    // And a pixel inside the same 8x8 cell should match too.
+    let o = (3 * w + 3) * 4;
+    assert_eq!((rgba[o], rgba[o + 1], rgba[o + 2]), (255, 0, 0));
+}

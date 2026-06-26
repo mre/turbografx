@@ -67,6 +67,22 @@ pub struct BusDebug {
     pub irq_vectors_fetched: u64,
     /// Number of reads of the VDC status register (clears vblank/IRQ).
     pub vdc_status_reads: u64,
+    /// The vector address of the most recent IRQ dispatch (`$FFFA` = TIQ,
+    /// `$FFF8` = IRQ1/VDC, `$FFF6` = IRQ2/BRK). Lets a tracer attribute each
+    /// serviced interrupt to a source.
+    pub last_irq_vector: u16,
+    /// Number of writes to the VCE (palette / color ports).
+    pub vce_writes: u64,
+    /// VCE writes broken down by port offset (0..=7).
+    pub vce_offset_writes: [u64; 8],
+    /// VCE data-low writes ($0404) with a non-zero value.
+    pub vce_data_lo_nonzero: u64,
+    /// Inclusive-exclusive work-RAM (bank $F8) offset window to count writes to,
+    /// regardless of the logical address used. Set by a debugger.
+    pub ram_watch_lo: usize,
+    pub ram_watch_hi: usize,
+    /// Number of writes seen inside `[ram_watch_lo, ram_watch_hi)`.
+    pub ram_watch_writes: u64,
 }
 
 impl SystemBus {
@@ -170,8 +186,21 @@ impl SystemBus {
         let bank = (phys >> 13) as u8;
         match bank {
             HARDWARE_BANK => self.write_hardware((phys & 0x1FFF) as u16, value),
-            RAM_BANK..=0xFB => self.ram[(phys as usize) & (RAM_SIZE - 1)] = value,
-            // ROM and unmapped space ignore writes.
+            RAM_BANK..=0xFB => {
+                // Debug: count writes to the watched physical work-RAM window,
+                // regardless of which logical address / MPR mapping was used.
+                if bank == RAM_BANK {
+                    let off = (phys as usize) & (RAM_SIZE - 1);
+                    if (self.debug.ram_watch_lo..self.debug.ram_watch_hi).contains(&off) {
+                        self.debug.ram_watch_writes += 1;
+                    }
+                }
+                self.ram[(phys as usize) & (RAM_SIZE - 1)] = value;
+            }
+            // ROM ignores writes, except cards with a mapper (e.g. SF2) that
+            // latch a bank-select from the write address.
+            0x00..=ROM_BANK_MAX => self.cartridge.write(phys, value),
+            // Unmapped space ignores writes.
             _ => {}
         }
     }
@@ -199,7 +228,14 @@ impl SystemBus {
     fn write_hardware(&mut self, offset: u16, value: u8) {
         match offset {
             0x0000..=0x03FF => self.vdc.write(offset & 0x03, value),
-            0x0400..=0x07FF => self.vce.write(offset & 0x07, value),
+            0x0400..=0x07FF => {
+                self.debug.vce_writes += 1;
+                self.debug.vce_offset_writes[(offset & 0x07) as usize] += 1;
+                if offset & 0x07 == 0x04 && value != 0 {
+                    self.debug.vce_data_lo_nonzero += 1;
+                }
+                self.vce.write(offset & 0x07, value);
+            }
             0x0800..=0x0BFF => self.psg.write(offset & 0x0F, value),
             0x0C00..=0x0FFF => self.timer.write(offset & 0x01, value),
             0x1000..=0x13FF => self.io.write(value),
@@ -233,7 +269,9 @@ impl Bus for SystemBus {
         // The core asks which vector to use for the pending maskable IRQ; steer
         // it to the highest-priority HuC6280 source (TIQ > IRQ1 > IRQ2).
         self.debug.irq_vectors_fetched += 1;
-        self.active_irq_vector()
+        let vector = self.active_irq_vector();
+        self.debug.last_irq_vector = vector;
+        vector
     }
 
     fn set_mapping_register(&mut self, index: usize, value: u8) {

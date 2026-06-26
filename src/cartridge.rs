@@ -2,8 +2,14 @@
 //!
 //! A HuCard maps into physical banks `$00..=$7F` (up to 1 MiB). Most cards have
 //! no mapper and simply present their ROM; the console's MMU does all the
-//! banking. A handful of sizes need special treatment, which we approximate
-//! here and flag with TODOs.
+//! banking.
+//!
+//! The one exception is **Street Fighter II' Champion Edition**, a 2.5 MiB card
+//! that can't fit in the 1 MiB window. It carries a custom mapper: banks
+//! `$00..=$3F` are fixed, and banks `$40..=$7F` form a 512 KiB window that is
+//! switched between four pages by *writing* to a HuCard offset of
+//! `$1FF0..=$1FF3` (the low two address bits select the page). We detect this
+//! mapper from the ROM size (> 1 MiB).
 
 use std::io::Read;
 use std::path::Path;
@@ -11,10 +17,18 @@ use std::path::Path;
 /// Size of one physical bank: 8 KiB.
 pub const BANK_SIZE: usize = 0x2000;
 
+/// Size of the Street Fighter II bank-switch page (512 KiB = 64 banks).
+const SF2_PAGE_SIZE: usize = 0x80_000;
+
 /// A loaded HuCard.
 #[derive(Clone, Debug)]
 pub struct Cartridge {
     rom: Vec<u8>,
+    /// `true` if this is an oversized (Street Fighter II) card with the custom
+    /// `$40..=$7F` bank-switch mapper.
+    sf2: bool,
+    /// Currently selected SF2 page (0..=3) for the `$40..=$7F` window.
+    sf2_page: u8,
 }
 
 impl Cartridge {
@@ -28,7 +42,13 @@ impl Cartridge {
             // Strip the 512-byte header some old dumps prepend.
             data.drain(0..512);
         }
-        Self { rom: data }
+        // Cards larger than the 1 MiB HuCard window use the SF2 mapper.
+        let sf2 = data.len() > 0x10_0000;
+        Self {
+            rom: data,
+            sf2,
+            sf2_page: 0,
+        }
     }
 
     /// Number of 8 KiB banks in the image.
@@ -105,6 +125,8 @@ impl Cartridge {
     /// `phys` is the 21-bit physical address; only banks `$00..=$7F` are valid
     /// here. Out-of-range reads return open-bus (`$FF`).
     ///
+    /// For SF2 cards, banks `$40..=$7F` are offset by the selected page.
+    ///
     /// TODO: implement accurate mirroring for the irregular sizes. Real HuCards
     /// without a mapper just wire the high address bit as a chip-enable, so e.g.
     /// 384 KiB cards mirror the top 256 KiB into the upper half of the address
@@ -115,7 +137,28 @@ impl Cartridge {
         if self.rom.is_empty() {
             return 0xFF;
         }
-        let index = (phys as usize) % self.rom.len();
-        self.rom[index]
+        let mut index = phys as usize;
+        if self.sf2 {
+            let bank = (phys >> 13) & 0xFF;
+            // Banks $40..=$7F are the switchable window; add the page offset.
+            if (0x40..=0x7F).contains(&bank) {
+                index += self.sf2_page as usize * SF2_PAGE_SIZE;
+            }
+        }
+        self.rom[index % self.rom.len()]
+    }
+
+    /// Handle a write into the HuCard region.
+    ///
+    /// HuCard ROM ignores writes, but the SF2 mapper latches its page select
+    /// when the CPU writes to **physical bank `$00`** at a card offset of
+    /// `$1FF0..=$1FFF` (the low bits choose the page). The bank-`$00`
+    /// restriction matters: the `$40..=$7F` window banks that SF2 streams
+    /// graphics and palette data from also contain `$1FFx` offsets, and an
+    /// incidental write there must *not* be mistaken for a page select.
+    pub fn write(&mut self, phys: u32, _value: u8) {
+        if self.sf2 && (phys >> 13) == 0 && (phys & 0x1FF0) == 0x1FF0 {
+            self.sf2_page = (phys & 0x0F) as u8;
+        }
     }
 }

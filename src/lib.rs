@@ -62,3 +62,9 @@ pub const SCANLINES_PER_FRAME: u16 = 263;
 /// ~455 CPU cycles. This is a coarse number used to interleave CPU execution
 /// with the VDC's per-scanline stepping until proper dot-clock timing lands.
 pub const CPU_CYCLES_PER_SCANLINE: u64 = 455;
+
+/// Approximate CPU cycles of the active-display portion of a scanline (before
+/// HBlank). The remainder, `CPU_CYCLES_PER_SCANLINE - ACTIVE_CYCLES_PER_SCANLINE`,
+/// is HBlank, during which raster/vblank interrupt handlers run and program the
+/// registers for the next line.
+pub const ACTIVE_CYCLES_PER_SCANLINE: u64 = 342;

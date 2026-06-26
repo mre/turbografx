@@ -11,5 +11,7 @@ edition = "2024"
 mos6502 = { path = "../mos6502" }
 log = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+macroquad = "0.4"
 
 [dev-dependencies]
+image = { version = "0.24", default-features = false, features = ["png"] }

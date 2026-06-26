@@ -100,17 +100,17 @@ impl IoPort {
             return high;
         }
         let nibble = if self.select {
-            // SEL = 1: Run / Select / II / I
-            (u8::from(self.pad.run) << 3)
-                | (u8::from(self.pad.select) << 2)
-                | (u8::from(self.pad.button_ii) << 1)
-                | u8::from(self.pad.button_i)
-        } else {
-            // SEL = 0: Left / Down / Right / Up
+            // SEL = 1: directions -> D3..D0 = Left / Down / Right / Up
             (u8::from(self.pad.left) << 3)
                 | (u8::from(self.pad.down) << 2)
                 | (u8::from(self.pad.right) << 1)
                 | u8::from(self.pad.up)
+        } else {
+            // SEL = 0: buttons -> D3..D0 = Run / Select / II / I
+            (u8::from(self.pad.run) << 3)
+                | (u8::from(self.pad.select) << 2)
+                | (u8::from(self.pad.button_ii) << 1)
+                | u8::from(self.pad.button_i)
         };
         // Joypad data is active-low in the low nibble.
         high | (!nibble & 0x0F)
