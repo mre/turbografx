@@ -239,12 +239,11 @@ impl SystemBus {
             0x0800..=0x0BFF => self.psg.write(offset & 0x0F, value),
             0x0C00..=0x0FFF => self.timer.write(offset & 0x01, value),
             0x1000..=0x13FF => self.io.write(value),
-            0x1400..=0x17FF => {
+            0x1400..=0x17FF
                 // A write to $1403 acknowledges (clears) the timer interrupt.
-                if self.interrupts.write(offset & 0x03, value) {
+                if self.interrupts.write(offset & 0x03, value) => {
                     self.timer.acknowledge();
                 }
-            }
             _ => {}
         }
     }
