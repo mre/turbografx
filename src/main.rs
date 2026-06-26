@@ -24,7 +24,11 @@
 
 use macroquad::prelude::*;
 
-use mos6502::instruction::{AddressingMode, DisasmInstr, OpInput, disassemble_one};
+// Disassembler-based debugging is disabled until the `mos6502` disassembler is
+// released. See https://github.com/mre/mos6502/pull/135
+// use mos6502::instruction::{AddressingMode, OpInput};
+// use mos6502::instruction::{DisasmInstr, disassemble_one};
+
 use turbografx::Cartridge;
 use turbografx::Console;
 use turbografx::io::PadState;
@@ -83,10 +87,11 @@ async fn main() {
     // raster/vblank interrupts the VDC raises, every IRQ dispatch, and changes
     // to a set of watched RAM variables. Use it to find which interrupt is
     // supposed to advance the boot state machine and why it isn't firing.
-    if std::env::var("WATCH").is_ok() {
-        watch_state(&mut console);
-        return;
-    }
+    // Disabled until the mos6502 disassembler is released (see `watch_state`).
+    // if std::env::var("WATCH").is_ok() {
+    //     watch_state(&mut console);
+    //     return;
+    // }
 
     // TRACEDUMP=1 emits one line per executed instruction in the exact format
     // the Geargrafx trace harness produces, for a differential CPU diff from
@@ -283,6 +288,9 @@ fn trace_dump(console: &mut Console) {
     let _ = out.flush();
 }
 
+// The WATCH tracer and its instruction-decode helpers below are disabled until
+// the mos6502 disassembler is released (https://github.com/mre/mos6502/pull/135).
+/*
 /// Headless boot-state tracer. Watches the interrupt machinery and a handful of
 /// game RAM variables to answer: which interrupt is meant to advance the boot
 /// state machine, does it fire, and does the game's RCR ever match a line?
@@ -756,6 +764,7 @@ fn parse_hex_range(s: &str) -> Option<(u16, u16)> {
     let hi = u16::from_str_radix(hi.trim().trim_start_matches("0x"), 16).ok()?;
     Some((lo.min(hi), lo.max(hi)))
 }
+*/
 
 /// Parse a `u64` environment variable, falling back to `default`.
 fn env_u64(name: &str, default: u64) -> u64 {
