@@ -2,13 +2,18 @@
 name = "turbografx"
 version = "0.1.0"
 edition = "2024"
+description = "A TurboGrafx-16 / PC-Engine emulator written in Rust"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/mre/turbografx"
+readme = "README.md"
+keywords = ["emulator", "turbografx", "pc-engine", "huc6280", "retro"]
+categories = ["emulators"]
+# Keep ROMs and screenshots out of the published crate.
+# (ROMs are gitignored already, so this is just an additional safety measure.)
+exclude = ["roms/**", "assets/**"]
 
 [dependencies]
-# The HuC6280 (the CPU in the TurboGrafx-16 / PC Engine) is a 65C02 derivative.
-# We use the local `mos6502` crate, which has a dedicated `Huc6280` variant on
-# its `huc6280-variant` branch (MMU mapping registers, relocated zero
-# page/stack, remapped BRK vector and the extra opcodes).
-mos6502 = { path = "../mos6502" }
+mos6502 = "0.10.1"
 log = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 macroquad = "0.4"

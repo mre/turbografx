@@ -454,10 +454,10 @@ impl Vdc {
                 let plane01 = self.vram[(base + fine_y) % VRAM_WORDS];
                 let plane23 = self.vram[(base + fine_y + 8) % VRAM_WORDS];
                 let bit = 7 - fine_x;
-                let color = (((plane01 >> bit) & 1)
+                let color = ((plane01 >> bit) & 1)
                     | (((plane01 >> (bit + 8)) & 1) << 1)
                     | (((plane23 >> bit) & 1) << 2)
-                    | (((plane23 >> (bit + 8)) & 1) << 3)) as u16;
+                    | (((plane23 >> (bit + 8)) & 1) << 3);
 
                 if color != 0 {
                     *slot = (palette << 4) | color;
@@ -549,7 +549,7 @@ impl Vdc {
             let fine_y = row_in_sprite % 16;
 
             for col in 0..width {
-                let screen_x = sx + col as i32;
+                let screen_x = sx + col;
                 if screen_x < 0 || screen_x >= ACTIVE_WIDTH as i32 {
                     continue;
                 }
