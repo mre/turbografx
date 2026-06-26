@@ -29,7 +29,9 @@ All of these were captured straight out of the emulator (see `examples/dump_fram
 
 ## But Why?
 
-The TurboGrafx-16 is a great console, actually.
+This started as a test-project for the `mos6502` CPU crate, but it turned into a full emulator.
+
+Besides, the TurboGrafx-16 is a great console!
 In comparison to other consoles of its time, it had a lot of advantages:
 
 - It did NOT have a 16-bit CPU, but rather a Modified 8-bit CPU.
