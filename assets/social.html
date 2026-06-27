@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            html,
+            body {
+                background: #222;
+            }
+
+            .stage {
+                width: 1280px;
+                height: 640px;
+                position: relative;
+                background: #000;
+                overflow: hidden;
+                font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
+            }
+
+            /* Light diagonal "product shot" panel on the right */
+            .photo-panel {
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(135deg, #eef2f6 0%, #ccd4dd 100%);
+                clip-path: polygon(54% 0, 100% 0, 100% 100%, 40% 100%);
+            }
+
+            .shot {
+                position: absolute;
+                image-rendering: pixelated;
+                border: 7px solid #0e0e0e;
+                border-radius: 8px;
+                box-shadow: 0 28px 60px rgba(0, 0, 0, 0.45);
+            }
+            .shot.bomber {
+                width: 300px;
+                right: 300px;
+                top: 92px;
+                transform: rotate(-6deg);
+                z-index: 1;
+            }
+            .shot.splat {
+                width: 300px;
+                right: 330px;
+                top: 322px;
+                transform: rotate(7deg);
+                z-index: 2;
+            }
+            .shot.sf2 {
+                width: 440px;
+                right: 55px;
+                top: 196px;
+                transform: rotate(-4deg);
+                z-index: 3;
+            }
+
+            /* ---- Left black panel content ---- */
+            .logo {
+                position: absolute;
+                left: 56px;
+                top: 52px;
+                display: inline-flex;
+                align-items: center;
+                gap: 16px;
+                border: 5px solid #ffd200;
+                border-radius: 12px;
+                padding: 16px 26px;
+                background: #000;
+            }
+            .logo .word {
+                font-family: "Arial Narrow", "Helvetica Neue", sans-serif;
+                font-weight: 700;
+                font-size: 70px;
+                line-height: 1;
+                transform: scaleY(1.28);
+                transform-origin: center;
+                -webkit-text-stroke: 2.5px #ffd200;
+                color: transparent;
+                letter-spacing: 4px;
+            }
+            .logo .badge {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-width: 78px;
+                height: 60px;
+                padding: 0 10px;
+                border: 4px solid #ff7a00;
+                border-radius: 34px;
+                color: #fff;
+                font-size: 44px;
+                font-weight: 900;
+                letter-spacing: 2px;
+            }
+
+            .yellow {
+                position: absolute;
+                left: 60px;
+                top: 250px;
+                color: #ffd200;
+                font-size: 92px;
+                font-weight: 900;
+                letter-spacing: -1px;
+                line-height: 0.95;
+                text-transform: uppercase;
+                text-shadow: 0 5px 0 rgba(0, 0, 0, 0.6);
+            }
+
+            .white {
+                position: absolute;
+                left: 60px;
+                bottom: 66px;
+                color: #fff;
+                font-size: 62px;
+                font-weight: 900;
+                line-height: 0.98;
+                letter-spacing: -1px;
+                text-transform: uppercase;
+            }
+            .white .accent {
+                color: #ff7a00;
+            }
+
+            /* subtle CRT scanlines over everything */
+            .scan {
+                position: absolute;
+                inset: 0;
+                z-index: 9;
+                pointer-events: none;
+                background: repeating-linear-gradient(
+                    0deg,
+                    rgba(0, 0, 0, 0) 0 2px,
+                    rgba(0, 0, 0, 0.16) 2px 4px
+                );
+                mix-blend-mode: multiply;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="stage">
+            <div class="photo-panel">
+                <img class="shot splat" src="screenshots/splatterhouse.png" />
+                <img class="shot bomber" src="screenshots/bomberman.png" />
+                <img class="shot sf2" src="screenshots/street-fighter-ii.png" />
+            </div>
+
+            <div class="logo">
+                <span class="word">TURBOGRAFX</span>
+                <span class="badge">16</span>
+            </div>
+
+            <div class="yellow">RUST<br />POWERED</div>
+
+            <div class="white">
+                OPEN&nbsp;SOURCE<br /><span class="accent">EMULATOR</span>
+            </div>
+
+            <div class="scan"></div>
+        </div>
+    </body>
+</html>
