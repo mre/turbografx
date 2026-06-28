@@ -42,6 +42,12 @@ const ROM_BANK_MAX: u8 = 0x7F;
 /// 8 KiB of work RAM.
 const RAM_SIZE: usize = 0x2000;
 
+/// VDC data-port register selectors that touch VRAM (matching the address-latch
+/// values in [`crate::vdc`]). Used to decide which data-port writes arm a queued
+/// VRAM read/write for the per-dot slot-contention model.
+const VDC_REG_MARR: u8 = 0x01;
+const VDC_REG_VRR_VWR: u8 = 0x02;
+
 pub struct SystemBus {
     /// Shadow of the CPU's MPR0-MPR7 mapping registers, mirrored from the CPU
     /// via [`Bus::set_mapping_register`] as `TAM` writes happen.
@@ -55,6 +61,25 @@ pub struct SystemBus {
     pub timer: Timer,
     pub io: IoPort,
     pub interrupts: InterruptController,
+
+    /// Accumulated HuC6280 stall cycles from accessing the video chips: every
+    /// VDC ($0000-$03FF) or VCE ($0400-$07FF) access costs the CPU one extra
+    /// cycle while it waits for the dot clock. The console drains this after
+    /// each instruction to keep the timer/VDC pacing hardware-accurate.
+    pub video_stall_cycles: u64,
+
+    /// Throughput back-pressure for the shared CPU/VDC VRAM bus. The CPU and the
+    /// VDC contend for VRAM, so once the CPU latches a data-port access the VDC
+    /// holds the bus for a transfer delay and then until a free dot *slot*
+    /// arrives (see [`crate::vdc::Vdc::vram_reserve`]); a CPU access issued
+    /// before the bus frees waits. [`SystemBus::cpu_cycle`] is a monotonic
+    /// **master-clock** timestamp (21.48 MHz; the HuC6280 runs at master / 3)
+    /// the console advances after each instruction; the VDC owns the
+    /// bus-free timestamp and the per-line slot geometry. Modelling this keeps
+    /// timer/VDC pacing correct through heavy VRAM-DMA loops (e.g. Bravoman's
+    /// title-screen background draw), where the stall swings with the VDC's
+    /// sub-line fetch windows.
+    pub cpu_cycle: u64,
 
     /// Debug counters (not hardware state). Handy while bringing the system up.
     pub debug: BusDebug,
@@ -98,6 +123,8 @@ impl SystemBus {
             timer: Timer::new(),
             io: IoPort::new(),
             interrupts: InterruptController::new(),
+            video_stall_cycles: 0,
+            cpu_cycle: 0,
             debug: BusDebug::default(),
         }
     }
@@ -170,6 +197,15 @@ impl SystemBus {
         }
     }
 
+    /// Stall (in high-speed CPU cycles) the CPU pays draining the previously
+    /// latched VRAM access before a new data-port touch, delegating the per-dot
+    /// slot decision to the VDC (Geargrafx's `WaitForVramAccess`). The VDC
+    /// returns the wait in master clocks; the CPU runs at master / 3.
+    fn vram_wait(&mut self) -> u64 {
+        let stall_master = self.vdc.vram_wait(self.cpu_cycle);
+        stall_master.div_ceil(crate::timing::MASTER_PER_CPU_CYCLE)
+    }
+
     /// Read a physical address after MMU translation and vector remapping.
     fn read_physical(&mut self, phys: u32) -> u8 {
         let bank = (phys >> 13) as u8;
@@ -210,12 +246,34 @@ impl SystemBus {
     fn read_hardware(&mut self, offset: u16) -> u8 {
         match offset {
             0x0000..=0x03FF => {
-                if offset & 0x03 == 0 {
+                self.video_stall_cycles += 1;
+                let reg = offset & 0x03;
+                // A data-port access to a VRAM register (MAWR/MARR/VRR) shares
+                // the VRAM bus with the VDC's fetches. The CPU first drains any
+                // access still pending from a previous touch (it stalls here if
+                // the VDC has not yet found a free slot), then — on reading the
+                // VRR high byte — arms the next read.
+                let is_data = (reg == 0x02 || reg == 0x03) && self.vdc.selected_is_vram();
+                if is_data {
+                    self.video_stall_cycles += self.vram_wait();
+                }
+                if reg == 0 {
                     self.debug.vdc_status_reads += 1;
                 }
-                self.vdc.read(offset & 0x03)
+                let value = if reg == 0 {
+                    self.vdc.read_status(self.cpu_cycle)
+                } else {
+                    self.vdc.read(reg)
+                };
+                if reg == 0x03 && self.vdc.selected_reg() == VDC_REG_VRR_VWR {
+                    self.vdc.vram_queue(self.cpu_cycle, false);
+                }
+                value
             }
-            0x0400..=0x07FF => self.vce.read(offset & 0x07),
+            0x0400..=0x07FF => {
+                self.video_stall_cycles += 1;
+                self.vce.read(offset & 0x07)
+            }
             0x0800..=0x0BFF => self.psg.read(offset & 0x0F),
             0x0C00..=0x0FFF => self.timer.read(offset & 0x01),
             0x1000..=0x13FF => self.io.read(),
@@ -227,8 +285,31 @@ impl SystemBus {
     /// Dispatch a write within the bank-`$FF` hardware page.
     fn write_hardware(&mut self, offset: u16, value: u8) {
         match offset {
-            0x0000..=0x03FF => self.vdc.write(offset & 0x03, value),
+            0x0000..=0x03FF => {
+                self.video_stall_cycles += 1;
+                let reg = offset & 0x03;
+                // Writing the data port to a VRAM register (MAWR/MARR/VWR) shares
+                // the VRAM bus with the VDC's fetches. The CPU first drains any
+                // access still pending from a previous touch (it stalls here if
+                // the VDC has not yet found a free slot). A VWR high-byte write
+                // commits the word and arms the next write; an MARR high-byte
+                // write arms a read.
+                let is_data = (reg == 0x02 || reg == 0x03) && self.vdc.selected_is_vram();
+                if is_data {
+                    self.video_stall_cycles += self.vram_wait();
+                }
+                let selected = self.vdc.selected_reg();
+                self.vdc.write(reg, value);
+                if reg == 0x03 {
+                    if selected == VDC_REG_VRR_VWR {
+                        self.vdc.vram_queue(self.cpu_cycle, true);
+                    } else if selected == VDC_REG_MARR {
+                        self.vdc.vram_queue(self.cpu_cycle, false);
+                    }
+                }
+            }
             0x0400..=0x07FF => {
+                self.video_stall_cycles += 1;
                 self.debug.vce_writes += 1;
                 self.debug.vce_offset_writes[(offset & 0x07) as usize] += 1;
                 if offset & 0x07 == 0x04 && value != 0 {

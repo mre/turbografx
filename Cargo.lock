@@ -267,8 +267,7 @@ dependencies = [
 [[package]]
 name = "mos6502"
 version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41602b70ecb904b5359a3be5d947dacde19b03316284f1fbf804576437546e4d"
+source = "git+https://github.com/mre/mos6502?branch=disassemble-one#3e578666eaa858b24f49aa952161170412918d69"
 dependencies = [
  "bitflags 2.13.0",
  "log",

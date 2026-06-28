@@ -39,6 +39,7 @@ pub mod interrupts;
 pub mod io;
 pub mod psg;
 pub mod timer;
+pub mod timing;
 pub mod vce;
 pub mod vdc;
 
@@ -56,15 +57,14 @@ pub const CPU_CLOCK_HZ: u32 = 7_159_090;
 /// NTSC scanlines per frame (262 active + retrace ≈ 262/263).
 pub const SCANLINES_PER_FRAME: u16 = 263;
 
-/// Approximate CPU cycles per scanline at 7.16 MHz.
+/// CPU cycles per scanline at 7.16 MHz.
 ///
-/// Master horizontal total is ~1365 master clocks per line; at master/3 that's
-/// ~455 CPU cycles. This is a coarse number used to interleave CPU execution
-/// with the VDC's per-scanline stepping until proper dot-clock timing lands.
+/// Master horizontal total is 1365 master clocks per line; at master/3 that's
+/// 455 high-speed CPU cycles. Kept for tests/tools that need a coarse line
+/// length; the console itself now drives the VDC on the master-clock timeline.
 pub const CPU_CYCLES_PER_SCANLINE: u64 = 455;
 
-/// Approximate CPU cycles of the active-display portion of a scanline (before
-/// HBlank). The remainder, `CPU_CYCLES_PER_SCANLINE - ACTIVE_CYCLES_PER_SCANLINE`,
-/// is HBlank, during which raster/vblank interrupt handlers run and program the
-/// registers for the next line.
+/// Approximate high-speed CPU cycles in the active-display portion of a scanline
+/// (before HBlank). Kept as a compatibility constant for older helpers; the VDC
+/// now derives active-display events from HSR/HDR in master clocks.
 pub const ACTIVE_CYCLES_PER_SCANLINE: u64 = 342;
