@@ -202,27 +202,24 @@ async fn main() {
 
         clear_background(BLACK);
         if let Some(t) = &texture {
-            let source = if let Some(shader) = shader.as_mut() {
-                match shader.render(t, w, h, frame_count) {
-                    Ok(output) => output,
-                    Err(err) => {
-                        eprintln!("Shader render failed: {err}");
-                        return;
-                    }
+            if let Some(shader) = shader.as_mut() {
+                // The shader chain renders and blits directly to the window.
+                if let Err(err) = shader.render(t, w, h, frame_count) {
+                    eprintln!("Shader render failed: {err}");
+                    return;
                 }
             } else {
-                t
-            };
-            draw_texture_ex(
-                source,
-                0.0,
-                0.0,
-                WHITE,
-                DrawTextureParams {
-                    dest_size: Some(vec2(screen_width(), screen_height())),
-                    ..Default::default()
-                },
-            );
+                draw_texture_ex(
+                    t,
+                    0.0,
+                    0.0,
+                    WHITE,
+                    DrawTextureParams {
+                        dest_size: Some(vec2(screen_width(), screen_height())),
+                        ..Default::default()
+                    },
+                );
+            }
         }
 
         // F2 dumps the current frame interactively; `--screenshot` dumps a

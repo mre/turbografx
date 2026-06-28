@@ -50,13 +50,19 @@ impl SlangShader {
         })
     }
 
+    /// Run the shader chain on `input` and blit the result straight to the
+    /// default framebuffer (the window). We deliberately do not hand the result
+    /// back to macroquad to draw: librashader leaves raw GL state bound (sampler
+    /// objects on the texture units, its own program and VAO) and macroquad's
+    /// render-target draw path samples as black on macOS once that state is
+    /// active. A direct framebuffer blit is immune to both problems.
     pub fn render(
         &mut self,
         input: &Texture2D,
         source_width: usize,
         source_height: usize,
         frame_count: usize,
-    ) -> Result<&Texture2D, String> {
+    ) -> Result<(), String> {
         let output_size = (screen_width().ceil() as u32, screen_height().ceil() as u32);
         self.ensure_output(output_size)?;
 
@@ -79,6 +85,12 @@ impl SlangShader {
             output_size.0,
             output_size.1,
         )?;
+        // librashader always selects a *_MIPMAP_* minification filter for the
+        // source texture (see `gl_mip`), but the frame texture macroquad hands us
+        // only has mip level 0. macOS's OpenGL driver flags such a texture as
+        // mipmap-incomplete and samples zero/black instead. Clamp the mip range
+        // to level 0 so the texture is complete for a mipmap filter.
+        self.clamp_to_base_level(input.handle);
         let viewport = Viewport {
             x: 0.0,
             y: 0.0,
@@ -99,16 +111,46 @@ impl SlangShader {
                     Some(&FrameOptions::default()),
                 )
                 .map_err(|err| format!("failed to render shader frame: {err}"))?;
-            // librashader leaves raw GL state active. Macroquad will issue more
-            // draw calls afterwards, so return to the default framebuffer.
+
+            // Blit librashader's output texture into the default framebuffer (the
+            // window). The source FBO wraps the output texture for reading; the
+            // window is FBO 0. The destination Y range is flipped because the
+            // chain renders bottom-up while the window expects top-down.
+            let read_fbo = self
+                .context
+                .create_framebuffer()
+                .map_err(|err| format!("failed to create blit framebuffer: {err}"))?;
+            self.context
+                .bind_framebuffer(glow::READ_FRAMEBUFFER, Some(read_fbo));
+            self.context.framebuffer_texture_2d(
+                glow::READ_FRAMEBUFFER,
+                glow::COLOR_ATTACHMENT0,
+                glow::TEXTURE_2D,
+                output_image.handle,
+                0,
+            );
+            self.context.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
+            let w = output_size.0 as i32;
+            let h = output_size.1 as i32;
+            self.context.disable(glow::SCISSOR_TEST);
+            self.context.blit_framebuffer(
+                0,
+                0,
+                w,
+                h,
+                0,
+                h,
+                w,
+                0,
+                glow::COLOR_BUFFER_BIT,
+                glow::NEAREST,
+            );
+            self.context.bind_framebuffer(glow::READ_FRAMEBUFFER, None);
+            self.context.delete_framebuffer(read_fbo);
             self.context.bind_framebuffer(glow::FRAMEBUFFER, None);
         }
 
-        Ok(&self
-            .output
-            .as_ref()
-            .expect("output target was created")
-            .texture)
+        Ok(())
     }
 
     fn ensure_output(&mut self, size: (u32, u32)) -> Result<(), String> {
@@ -122,6 +164,22 @@ impl SlangShader {
         self.output = Some(target);
         self.output_size = size;
         Ok(())
+    }
+
+    /// Restrict a texture to mip level 0 so it is complete when sampled with a
+    /// mipmap minification filter. macroquad-created textures only have level 0,
+    /// but librashader samples the source with a `*_MIPMAP_*` filter; macOS's
+    /// OpenGL driver otherwise rejects them as incomplete and samples black.
+    fn clamp_to_base_level(&self, handle: Option<glow::NativeTexture>) {
+        let Some(handle) = handle else { return };
+        unsafe {
+            self.context.bind_texture(glow::TEXTURE_2D, Some(handle));
+            self.context
+                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_BASE_LEVEL, 0);
+            self.context
+                .tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAX_LEVEL, 0);
+            self.context.bind_texture(glow::TEXTURE_2D, None);
+        }
     }
 }
 
