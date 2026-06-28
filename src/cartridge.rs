@@ -11,6 +11,8 @@
 //! `$1FF0..=$1FF3` (the low two address bits select the page). We detect this
 //! mapper from the ROM size (> 1 MiB).
 
+use crate::io::PadMode;
+
 use std::io::Read;
 use std::path::Path;
 
@@ -24,6 +26,8 @@ const SF2_PAGE_SIZE: usize = 0x80_000;
 #[derive(Clone, Debug)]
 pub struct Cartridge {
     rom: Vec<u8>,
+    /// CRC-32 of the header-stripped ROM image, used for compatibility quirks.
+    crc32: u32,
     /// `true` if this is an oversized (Street Fighter II) card with the custom
     /// `$40..=$7F` bank-switch mapper.
     sf2: bool,
@@ -44,11 +48,25 @@ impl Cartridge {
         }
         // Cards larger than the 1 MiB HuCard window use the SF2 mapper.
         let sf2 = data.len() > 0x10_0000;
+        let crc32 = crc32(&data);
         Self {
             rom: data,
+            crc32,
             sf2,
             sf2_page: 0,
         }
+    }
+
+    /// CRC-32 of the header-stripped ROM image.
+    #[must_use]
+    pub const fn crc32(&self) -> u32 {
+        self.crc32
+    }
+
+    /// Preferred pad mode for known controller-sensitive games.
+    #[must_use]
+    pub fn recommended_pad_mode(&self) -> Option<PadMode> {
+        crate::game_db::pad_mode_for_crc(self.crc32)
     }
 
     /// Number of 8 KiB banks in the image.
@@ -160,5 +178,50 @@ impl Cartridge {
         if self.sf2 && (phys >> 13) == 0 && (phys & 0x1FF0) == 0x1FF0 {
             self.sf2_page = (phys & 0x0F) as u8;
         }
+    }
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFF_u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xEDB8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cartridge, crc32};
+    use crate::io::PadMode;
+
+    #[test]
+    fn crc32_matches_standard_check_value() {
+        assert_eq!(crc32(b"123456789"), 0xCBF4_3926);
+    }
+
+    #[test]
+    fn strips_copier_header_before_crc() {
+        let mut headered = vec![0xAA; 512];
+        headered.extend_from_slice(&vec![0u8; 0x2000]);
+        let plain = Cartridge::from_bytes(vec![0u8; 0x2000]);
+        let with_header = Cartridge::from_bytes(headered);
+        assert_eq!(with_header.crc32(), plain.crc32());
+    }
+
+    #[test]
+    fn recommends_six_button_for_street_fighter_crc() {
+        // This test pins the compatibility-db plumbing; the CRC value comes from
+        // known Street Fighter II' - Champion Edition dumps.
+        let cart = Cartridge {
+            rom: Vec::new(),
+            crc32: 0xD15C_B6BB,
+            sf2: false,
+            sf2_page: 0,
+        };
+        assert_eq!(cart.recommended_pad_mode(), Some(PadMode::AvenuePad6));
     }
 }

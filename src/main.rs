@@ -4,6 +4,7 @@
 //!
 //! ```text
 //! cargo run --release -- path/to/game.zip      # opens a window
+//! cargo run --release -- --pad 6 path/to/game.pce
 //! cargo run --release -- path/to/game.pce
 //! TRACE=1 cargo run --release -- path/to/game.zip   # headless derail tracer
 //! ```
@@ -15,12 +16,15 @@
 //!
 //! | Key            | Pad        |
 //! |----------------|------------|
-//! | Arrow keys     | D-pad      |
-//! | Z              | Button I   |
-//! | X              | Button II  |
-//! | Enter          | Run        |
-//! | Right Shift    | Select     |
-//! | Esc            | Quit       |
+//! | Arrow keys     | D-pad                 |
+//! | Z / X / C      | Buttons I / II / III  |
+//! | A / S / D      | Buttons IV / V / VI   |
+//! | Enter          | Run                   |
+//! | Right Shift    | Select                |
+//! | Esc            | Quit                  |
+//!
+//! `--pad auto` uses a small compatibility database. You can also force
+//! `--pad 2`, `--pad 3-select`, `--pad 3-run`, or `--pad 6`.
 
 use macroquad::prelude::*;
 
@@ -29,9 +33,9 @@ use macroquad::prelude::*;
 // use mos6502::instruction::{AddressingMode, OpInput};
 // use mos6502::instruction::{DisasmInstr, disassemble_one};
 
-use turbografx::Cartridge;
-use turbografx::Console;
-use turbografx::io::PadState;
+use turbografx::game_db::{pad_mode_for_title, pad_mode_name};
+use turbografx::io::{PadMode, PadState};
+use turbografx::{Cartridge, Console};
 
 /// Integer scale factor for the window (256x239 -> 768x717).
 const SCALE: i32 = 3;
@@ -55,7 +59,19 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let rom_path = std::env::args().nth(1);
+    let options = match Options::parse(std::env::args().skip(1)) {
+        Ok(options) => options,
+        Err(message) => {
+            eprintln!("{message}");
+            print_usage();
+            return;
+        }
+    };
+    if options.help {
+        print_usage();
+        return;
+    }
+    let rom_path = options.rom_path;
 
     let cartridge = match &rom_path {
         Some(path) => match Cartridge::from_path(path) {
@@ -74,7 +90,29 @@ async fn main() {
         }
     };
 
+    let crc_pad_mode = cartridge.recommended_pad_mode();
+    let title_pad_mode = if crc_pad_mode.is_none() {
+        rom_path
+            .as_deref()
+            .and_then(rom_title)
+            .and_then(pad_mode_for_title)
+    } else {
+        None
+    };
+
     let mut console = Console::new(cartridge);
+    let pad_source = if let Some(mode) = options.pad_mode {
+        console.set_pad_mode(mode);
+        "forced"
+    } else if let Some(mode) = title_pad_mode {
+        console.set_pad_mode(mode);
+        "title match"
+    } else if crc_pad_mode.is_some() {
+        "CRC match"
+    } else {
+        "default"
+    };
+    println!("Pad: {} ({pad_source})", pad_mode_name(console.pad_mode()));
     println!("reset: PC={:#06x}", console.cpu().registers.program_counter);
 
     // TRACE=1 runs the headless derailment tracer instead of opening a window.
@@ -173,6 +211,70 @@ async fn main() {
     }
 }
 
+struct Options {
+    rom_path: Option<String>,
+    pad_mode: Option<PadMode>,
+    help: bool,
+}
+
+impl Options {
+    fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
+        let mut rom_path = None;
+        let mut pad_mode = None;
+        let mut help = false;
+        let mut args = args.into_iter();
+        while let Some(arg) = args.next() {
+            match arg.as_str() {
+                "-h" | "--help" => help = true,
+                "--pad" => {
+                    let Some(value) = args.next() else {
+                        return Err("--pad requires a value".to_owned());
+                    };
+                    pad_mode = parse_pad_mode(&value)?;
+                }
+                "--two-button" => pad_mode = Some(PadMode::TwoButton),
+                "--six-button" => pad_mode = Some(PadMode::AvenuePad6),
+                "--avenue-pad-3-select" => pad_mode = Some(PadMode::AvenuePad3Select),
+                "--avenue-pad-3-run" => pad_mode = Some(PadMode::AvenuePad3Run),
+                _ if arg.starts_with('-') => return Err(format!("unknown option: {arg}")),
+                _ if rom_path.is_none() => rom_path = Some(arg),
+                _ => return Err(format!("unexpected argument: {arg}")),
+            }
+        }
+        Ok(Self {
+            rom_path,
+            pad_mode,
+            help,
+        })
+    }
+}
+
+fn parse_pad_mode(value: &str) -> Result<Option<PadMode>, String> {
+    match value.to_ascii_lowercase().as_str() {
+        "auto" => Ok(None),
+        "2" | "2-button" | "two-button" => Ok(Some(PadMode::TwoButton)),
+        "3-select" | "3button-select" | "avenue3-select" => Ok(Some(PadMode::AvenuePad3Select)),
+        "3-run" | "3button-run" | "avenue3-run" => Ok(Some(PadMode::AvenuePad3Run)),
+        "6" | "6-button" | "six-button" | "avenue6" => Ok(Some(PadMode::AvenuePad6)),
+        _ => Err(format!(
+            "unknown pad mode: {value} (expected auto, 2, 3-select, 3-run, or 6)"
+        )),
+    }
+}
+
+fn print_usage() {
+    eprintln!(
+        "usage: turbografx [--pad auto|2|3-select|3-run|6] [rom.pce|rom.zip]\n\
+         aliases: --two-button, --six-button, --avenue-pad-3-select, --avenue-pad-3-run"
+    );
+}
+
+fn rom_title(path: &str) -> Option<&str> {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+}
+
 /// Map the current keyboard state to a controller.
 fn read_pad() -> PadState {
     PadState {
@@ -182,6 +284,10 @@ fn read_pad() -> PadState {
         right: is_key_down(KeyCode::Right),
         button_i: is_key_down(KeyCode::Z),
         button_ii: is_key_down(KeyCode::X),
+        button_iii: is_key_down(KeyCode::C),
+        button_iv: is_key_down(KeyCode::A),
+        button_v: is_key_down(KeyCode::S),
+        button_vi: is_key_down(KeyCode::D),
         run: is_key_down(KeyCode::Enter),
         select: is_key_down(KeyCode::RightShift),
     }
