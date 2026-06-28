@@ -61,7 +61,7 @@ impl Vce {
     }
 
     #[must_use]
-    pub fn read(&self, offset: u16) -> u8 {
+    pub fn read(&mut self, offset: u16) -> u8 {
         match offset & 0x07 {
             0x04 => {
                 let entry = self.address as usize % PALETTE_ENTRIES;
@@ -69,7 +69,10 @@ impl Vce {
             }
             0x05 => {
                 let entry = self.address as usize % PALETTE_ENTRIES;
-                ((self.palette[entry] >> 8) & 0x01) as u8 | 0xFE
+                let value = ((self.palette[entry] >> 8) & 0x01) as u8 | 0xFE;
+                // Like writes, reading the high byte advances the CRAM address.
+                self.address = (self.address + 1) & 0x01FF;
+                value
             }
             _ => 0xFF,
         }
