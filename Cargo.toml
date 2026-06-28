@@ -12,6 +12,13 @@ categories = ["emulators"]
 # (ROMs are gitignored already, so this is just an additional safety measure.)
 exclude = ["roms/**", "assets/**"]
 
+[features]
+default = ["std", "frontend", "zip-roms"]
+std = ["alloc", "log/std"]
+alloc = []
+frontend = ["std", "dep:macroquad"]
+zip-roms = ["std", "dep:zip"]
+
 [dependencies]
 # The HuC6280 (the CPU in the TurboGrafx-16 / PC Engine) is a 65C02 derivative.
 # We depend on the `disassemble-one` branch from mos6502 PR #135, which builds
@@ -19,10 +26,15 @@ exclude = ["roms/**", "assets/**"]
 # remapped BRK vector and the extra opcodes) and additionally provides the
 # non-mutating `instruction::disassemble_one` API used by the live debugger.
 # https://github.com/mre/mos6502/pull/135
-mos6502 = { version = "0.10.1", git = "https://github.com/mre/mos6502", branch = "disassemble-one" }
-log = "0.4"
-zip = { version = "2", default-features = false, features = ["deflate"] }
-macroquad = "0.4"
+mos6502 = { version = "0.10.1", git = "https://github.com/mre/mos6502", branch = "disassemble-one", default-features = false }
+log = { version = "0.4", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+macroquad = { version = "0.4", optional = true }
+
+[[bin]]
+name = "turbografx"
+path = "src/main.rs"
+required-features = ["frontend"]
 
 [dev-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }

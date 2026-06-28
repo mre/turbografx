@@ -1,3 +1,5 @@
+#![cfg_attr(not(feature = "std"), no_std)]
+
 //! A TurboGrafx-16 / PC Engine emulator core.
 //!
 //! The console is built around the Hudson Soft / NEC **HuC6280** CPU (a 65C02
@@ -31,6 +33,8 @@
 //! the hardware page (bank `$FF`).
 //!
 //! See [`crate::bus`] for the important note on interrupt-vector handling.
+
+extern crate alloc;
 
 pub mod bus;
 pub mod cartridge;

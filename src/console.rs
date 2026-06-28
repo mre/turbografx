@@ -4,6 +4,8 @@ use crate::bus::SystemBus;
 use crate::cartridge::Cartridge;
 use crate::io::{PadMode, PadState};
 use crate::vdc::{ACTIVE_HEIGHT, ACTIVE_WIDTH, FB_HEIGHT, FB_WIDTH};
+use alloc::vec;
+use alloc::vec::Vec;
 use mos6502::cpu::CPU;
 use mos6502::instruction::Huc6280;
 use mos6502::memory::Bus;
