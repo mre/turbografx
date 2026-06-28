@@ -35,6 +35,7 @@
 pub mod bus;
 pub mod cartridge;
 pub mod console;
+pub mod game_db;
 pub mod interrupts;
 pub mod io;
 pub mod psg;

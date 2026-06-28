@@ -2,7 +2,7 @@
 
 use crate::bus::SystemBus;
 use crate::cartridge::Cartridge;
-use crate::io::PadState;
+use crate::io::{PadMode, PadState};
 use crate::vdc::{ACTIVE_HEIGHT, ACTIVE_WIDTH, FB_HEIGHT, FB_WIDTH};
 use mos6502::cpu::CPU;
 use mos6502::instruction::Huc6280;
@@ -35,7 +35,11 @@ impl Console {
     /// Build a console around a loaded HuCard and run the reset sequence.
     #[must_use]
     pub fn new(cartridge: Cartridge) -> Self {
-        let bus = SystemBus::new(cartridge);
+        let recommended_pad_mode = cartridge.recommended_pad_mode();
+        let mut bus = SystemBus::new(cartridge);
+        if let Some(mode) = recommended_pad_mode {
+            bus.io.set_pad_mode(mode);
+        }
         let mut console = Self {
             cpu: CPU::new(bus, Huc6280),
             last_step_cycles: 0,
@@ -317,6 +321,17 @@ impl Console {
     /// Update the controller state (call once per frame from your input layer).
     pub fn set_pad(&mut self, pad: PadState) {
         self.cpu.memory.io.set_pad(pad);
+    }
+
+    /// Select the connected pad type.
+    pub fn set_pad_mode(&mut self, mode: PadMode) {
+        self.cpu.memory.io.set_pad_mode(mode);
+    }
+
+    /// Return the connected pad type.
+    #[must_use]
+    pub const fn pad_mode(&self) -> PadMode {
+        self.cpu.memory.io.pad_mode()
     }
 
     /// Enable or disable Avenue Pad 6 protocol for games that support it.
