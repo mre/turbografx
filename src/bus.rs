@@ -71,7 +71,7 @@ pub struct SystemBus {
     /// Throughput back-pressure for the shared CPU/VDC VRAM bus. The CPU and the
     /// VDC contend for VRAM, so once the CPU latches a data-port access the VDC
     /// holds the bus for a transfer delay and then until a free dot *slot*
-    /// arrives (see [`crate::vdc::Vdc::vram_reserve`]); a CPU access issued
+    /// arrives (see [`crate::vdc::Vdc::vram_queue`]); a CPU access issued
     /// before the bus frees waits. [`SystemBus::cpu_cycle`] is a monotonic
     /// **master-clock** timestamp (21.48 MHz; the HuC6280 runs at master / 3)
     /// the console advances after each instruction; the VDC owns the

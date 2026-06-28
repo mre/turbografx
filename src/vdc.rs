@@ -1497,7 +1497,7 @@ impl Vdc {
             let fine_y = row_in_sprite % 16;
 
             for col in 0..sprite_width {
-                let screen_x = sx + col as i32;
+                let screen_x = sx + col;
                 if screen_x < 0 || screen_x >= display_width as i32 {
                     continue;
                 }
@@ -1660,8 +1660,8 @@ impl Vdc {
     /// Recompute the per-dot VRAM slot-contention context for a display line
     /// that starts at master time `line_start`, for the VCE `dot_clock_select`
     /// (`0`/`1`/`2` -> divider 4/3/2). The console calls this at every line
-    /// boundary so that subsequent CPU VRAM data-port accesses (routed through
-    /// [`Vdc::vram_reserve`]) are gated by the VDC's true background/sprite
+    /// boundary so that subsequent CPU VRAM data-port accesses (queued through
+    /// [`Vdc::vram_queue`]) are gated by the VDC's true background/sprite
     /// fetch windows for the line. See [`VramSlotTiming`].
     pub fn begin_slot_line(&mut self, dot_clock_select: u8, line_start: u64) {
         let d: i32 = match dot_clock_select {

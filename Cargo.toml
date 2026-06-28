@@ -19,7 +19,7 @@ exclude = ["roms/**", "assets/**"]
 # remapped BRK vector and the extra opcodes) and additionally provides the
 # non-mutating `instruction::disassemble_one` API used by the live debugger.
 # https://github.com/mre/mos6502/pull/135
-mos6502 = { git = "https://github.com/mre/mos6502", branch = "disassemble-one" }
+mos6502 = { version = "0.10.1", git = "https://github.com/mre/mos6502", branch = "disassemble-one" }
 log = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 macroquad = "0.4"
