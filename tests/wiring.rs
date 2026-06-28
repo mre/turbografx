@@ -148,12 +148,25 @@ fn vdc_renders_a_background_tile() {
     // --- MWR = 32x32, CR = background enable ------------------------------
     select(bus, 0x09); // MWR
     write_data(bus, 0x0000);
+    // Vertical timing: VDS=14 opens the active window at content line 0 on the
+    // first visible screen row, and VCR=6 makes the four phases sum to the
+    // 263-line frame so the picture is stable (VSW1 + VDS16 + VDW240 + VCR6).
+    select(bus, 0x0D); // VDW
+    write_data(bus, 239);
+    select(bus, 0x0E); // VCR
+    write_data(bus, 6);
+    select(bus, 0x0C); // VPR
+    write_data(bus, 0x0E00); // VDS=14, VSW=0
     select(bus, 0x05); // CR
     write_data(bus, 0x0080); // BG enable (bit 7)
 
-    // Render one full frame straight from the VDC.
-    for _ in 0..turbografx::SCANLINES_PER_FRAME {
-        bus.vdc.step_scanline();
+    // Render a few full frames: the vertical-timing registers latch at the
+    // vertical-sync boundary, so the active window only settles after the first
+    // frame. Each frame overwrites the framebuffer, so the last one is checked.
+    for _ in 0..3 {
+        for _ in 0..turbografx::SCANLINES_PER_FRAME {
+            bus.vdc.step_scanline();
+        }
     }
 
     // Pixel (0,0) lies in BAT cell 0, so it should be the tile's red colour.
