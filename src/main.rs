@@ -15,12 +15,12 @@
 //!
 //! | Key            | Pad        |
 //! |----------------|------------|
-//! | Arrow keys     | D-pad      |
-//! | Z              | Button I   |
-//! | X              | Button II  |
-//! | Enter          | Run        |
-//! | Right Shift    | Select     |
-//! | Esc            | Quit       |
+//! | Arrow keys     | D-pad                 |
+//! | Z / X / C      | Buttons I / II / III  |
+//! | A / S / D      | Buttons IV / V / VI   |
+//! | Enter          | Run                   |
+//! | Right Shift    | Select                |
+//! | Esc            | Quit                  |
 
 use macroquad::prelude::*;
 
@@ -75,6 +75,12 @@ async fn main() {
     };
 
     let mut console = Console::new(cartridge);
+    if rom_path
+        .as_deref()
+        .is_some_and(|path| path.to_ascii_lowercase().contains("street fighter"))
+    {
+        console.set_six_button_pad(true);
+    }
     println!("reset: PC={:#06x}", console.cpu().registers.program_counter);
 
     // TRACE=1 runs the headless derailment tracer instead of opening a window.
@@ -182,6 +188,10 @@ fn read_pad() -> PadState {
         right: is_key_down(KeyCode::Right),
         button_i: is_key_down(KeyCode::Z),
         button_ii: is_key_down(KeyCode::X),
+        button_iii: is_key_down(KeyCode::C),
+        button_iv: is_key_down(KeyCode::A),
+        button_v: is_key_down(KeyCode::S),
+        button_vi: is_key_down(KeyCode::D),
         run: is_key_down(KeyCode::Enter),
         select: is_key_down(KeyCode::RightShift),
     }

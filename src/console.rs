@@ -319,6 +319,11 @@ impl Console {
         self.cpu.memory.io.set_pad(pad);
     }
 
+    /// Enable or disable Avenue Pad 6 protocol for games that support it.
+    pub fn set_six_button_pad(&mut self, enabled: bool) {
+        self.cpu.memory.io.set_six_button(enabled);
+    }
+
     /// Convert the VDC's palette-index framebuffer into a packed `0xAARRGGBB`
     /// image through the VCE palette. The returned buffer is [`FB_WIDTH`] ×
     /// [`FB_HEIGHT`].
