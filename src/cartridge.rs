@@ -13,7 +13,10 @@
 
 use crate::io::PadMode;
 
+use alloc::vec::Vec;
+#[cfg(feature = "zip-roms")]
 use std::io::Read;
+#[cfg(feature = "std")]
 use std::path::Path;
 
 /// Size of one physical bank: 8 KiB.
@@ -75,14 +78,16 @@ impl Cartridge {
         self.rom.len().div_ceil(BANK_SIZE)
     }
 
-    /// Load a HuCard from a path. Accepts either a raw image (`.pce`/`.bin`) or
-    /// a `.zip` archive, in which case the first file that looks like a ROM
-    /// (`.pce`/`.bin`, or the only entry) is extracted on the fly.
+    /// Load a HuCard from a path. Accepts either a raw image (`.pce`/`.bin`) or,
+    /// with the `zip-roms` feature enabled, a `.zip` archive. For ZIPs, the
+    /// first file that looks like a ROM (`.pce`/`.bin`, or the only entry) is
+    /// extracted on the fly.
     ///
     /// # Errors
     ///
     /// Returns an error if the file can't be read or a zip contains no usable
     /// ROM entry.
+    #[cfg(feature = "std")]
     pub fn from_path(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref();
         let bytes = std::fs::read(path)?;
@@ -91,7 +96,17 @@ impl Cartridge {
                 .extension()
                 .is_some_and(|e| e.eq_ignore_ascii_case("zip"));
         if is_zip {
-            Self::from_zip_bytes(&bytes)
+            #[cfg(feature = "zip-roms")]
+            {
+                Self::from_zip_bytes(&bytes)
+            }
+            #[cfg(not(feature = "zip-roms"))]
+            {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "zip ROM support is disabled",
+                ))
+            }
         } else {
             Ok(Self::from_bytes(bytes))
         }
@@ -102,6 +117,7 @@ impl Cartridge {
     /// # Errors
     ///
     /// Returns an error if the archive is invalid or holds no usable entry.
+    #[cfg(feature = "zip-roms")]
     pub fn from_zip_bytes(bytes: &[u8]) -> std::io::Result<Self> {
         let reader = std::io::Cursor::new(bytes);
         let mut archive = zip::ZipArchive::new(reader)
@@ -197,6 +213,8 @@ fn crc32(bytes: &[u8]) -> u32 {
 mod tests {
     use super::{Cartridge, crc32};
     use crate::io::PadMode;
+    use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn crc32_matches_standard_check_value() {

@@ -6,6 +6,9 @@
 
 use crate::io::PadMode;
 
+use alloc::string::String;
+use alloc::vec::Vec;
+
 /// Return the preferred pad mode for a known ROM CRC-32.
 #[must_use]
 pub fn pad_mode_for_crc(crc: u32) -> Option<PadMode> {

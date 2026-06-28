@@ -32,6 +32,10 @@
 //!   most raster split / parallax effects work, but exact mid-line timing does
 //!   not.
 
+use alloc::vec;
+use alloc::vec::Vec;
+use core::mem;
+
 /// VRAM size in 16-bit words (64 KiB).
 pub const VRAM_WORDS: usize = 0x8000;
 
@@ -1619,7 +1623,7 @@ impl Vdc {
 
     /// Take and clear the events captured since the last drain.
     pub fn drain_events(&mut self) -> Vec<VdcEvent> {
-        std::mem::take(&mut self.events)
+        mem::take(&mut self.events)
     }
 
     /// Whether the currently-selected data-port register targets VRAM (MAWR,
