@@ -4,6 +4,7 @@
 //!
 //! ```text
 //! cargo run --release -- path/to/game.zip      # opens a window
+//! cargo run --release -- --shader shaders/crt.slangp path/to/game.zip
 //! cargo run --release -- --pad 6 path/to/game.pce
 //! cargo run --release -- path/to/game.pce
 //! TRACE=1 cargo run --release -- path/to/game.zip   # headless derail tracer
@@ -26,6 +27,8 @@
 //! `--pad auto` uses a small compatibility database. You can also force
 //! `--pad 2`, `--pad 3-select`, `--pad 3-run`, or `--pad 6`.
 
+mod slang_shader;
+
 use macroquad::prelude::*;
 
 // Disassembler-based debugging is disabled until the `mos6502` disassembler is
@@ -33,6 +36,7 @@ use macroquad::prelude::*;
 // use mos6502::instruction::{AddressingMode, OpInput};
 // use mos6502::instruction::{DisasmInstr, disassemble_one};
 
+use slang_shader::SlangShader;
 use turbografx::game_db::{pad_mode_for_title, pad_mode_name};
 use turbografx::io::{PadMode, PadState};
 use turbografx::{Cartridge, Console};
@@ -147,7 +151,21 @@ async fn main() {
     }
 
     let (w, h) = console.active_size();
+    let mut shader = match options.shader_path.as_deref() {
+        Some(path) => match SlangShader::load(path) {
+            Ok(shader) => {
+                println!("Loaded shader: {path}");
+                Some(shader)
+            }
+            Err(err) => {
+                eprintln!("Failed to load shader {path}: {err}");
+                return;
+            }
+        },
+        None => None,
+    };
     let mut texture: Option<Texture2D> = None;
+    let mut frame_count = 0usize;
 
     // Pace the emulation to the NTSC PC Engine's ~60 Hz frame rate. macroquad's
     // `next_frame().await` blocks on the display's vsync, so without this the
@@ -184,8 +202,19 @@ async fn main() {
 
         clear_background(BLACK);
         if let Some(t) = &texture {
+            let source = if let Some(shader) = shader.as_mut() {
+                match shader.render(t, w, h, frame_count) {
+                    Ok(output) => output,
+                    Err(err) => {
+                        eprintln!("Shader render failed: {err}");
+                        return;
+                    }
+                }
+            } else {
+                t
+            };
             draw_texture_ex(
-                t,
+                source,
                 0.0,
                 0.0,
                 WHITE,
@@ -195,6 +224,7 @@ async fn main() {
                 },
             );
         }
+        frame_count = frame_count.wrapping_add(1);
 
         next_frame().await;
 
@@ -214,6 +244,7 @@ async fn main() {
 struct Options {
     rom_path: Option<String>,
     pad_mode: Option<PadMode>,
+    shader_path: Option<String>,
     help: bool,
 }
 
@@ -221,6 +252,7 @@ impl Options {
     fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, String> {
         let mut rom_path = None;
         let mut pad_mode = None;
+        let mut shader_path = None;
         let mut help = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -231,6 +263,12 @@ impl Options {
                         return Err("--pad requires a value".to_owned());
                     };
                     pad_mode = parse_pad_mode(&value)?;
+                }
+                "--shader" | "--slang-shader" => {
+                    let Some(value) = args.next() else {
+                        return Err(format!("{arg} requires a value"));
+                    };
+                    shader_path = Some(value);
                 }
                 "--two-button" => pad_mode = Some(PadMode::TwoButton),
                 "--six-button" => pad_mode = Some(PadMode::AvenuePad6),
@@ -244,6 +282,7 @@ impl Options {
         Ok(Self {
             rom_path,
             pad_mode,
+            shader_path,
             help,
         })
     }
@@ -264,7 +303,7 @@ fn parse_pad_mode(value: &str) -> Result<Option<PadMode>, String> {
 
 fn print_usage() {
     eprintln!(
-        "usage: turbografx [--pad auto|2|3-select|3-run|6] [rom.pce|rom.zip]\n\
+        "usage: turbografx [--pad auto|2|3-select|3-run|6] [--shader shader.slang|shader.slangp] [rom.pce|rom.zip]\n\
          aliases: --two-button, --six-button, --avenue-pad-3-select, --avenue-pad-3-run"
     );
 }

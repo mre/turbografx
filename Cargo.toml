@@ -10,13 +10,14 @@ keywords = ["emulator", "turbografx", "pc-engine", "huc6280", "retro"]
 categories = ["emulators"]
 # Keep ROMs and screenshots out of the published crate.
 # (ROMs are gitignored already, so this is just an additional safety measure.)
-exclude = ["roms/**", "assets/**"]
+exclude = ["roms/**", "assets/**", "shaders/**"]
 
 [features]
-default = ["std", "frontend", "zip-roms"]
+default = ["std", "frontend", "zip-roms", "slang-shaders"]
 std = ["alloc", "log/std"]
 alloc = []
 frontend = ["std", "dep:macroquad"]
+slang-shaders = ["frontend", "dep:glow", "dep:librashader", "dep:libloading"]
 zip-roms = ["std", "dep:zip"]
 
 [dependencies]
@@ -28,6 +29,9 @@ zip-roms = ["std", "dep:zip"]
 # https://github.com/mre/mos6502/pull/135
 mos6502 = { version = "0.10.1", git = "https://github.com/mre/mos6502", branch = "disassemble-one", default-features = false }
 log = { version = "0.4", default-features = false }
+glow = { version = "0.17", optional = true }
+librashader = { version = "0.11.2", default-features = false, features = ["presets", "runtime-gl"], optional = true }
+libloading = { version = "0.8", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 macroquad = { version = "0.4", optional = true }
 
