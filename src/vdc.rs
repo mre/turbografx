@@ -55,16 +55,6 @@ pub const ACTIVE_HEIGHT: usize = 239;
 /// First scanline of vertical blanking.
 pub const VBLANK_LINE: u16 = ACTIVE_HEIGHT as u16;
 
-/// Physical scanlines of top blanking before the first displayable screen row.
-/// The VDC's vertical-display-start (VDS) region is programmed so its active
-/// (VDW) window opens at this physical line; screen row 0 = physical line
-/// `TOP_BLANKING`. Matches Geargrafx's `HUC6270_LINES_TOP_BLANKING`.
-const TOP_BLANKING: u16 = 14;
-
-/// Last physical scanline (exclusive) that maps onto a screen row. Physical
-/// lines `TOP_BLANKING..BOTTOM_BLANKING` are the visible window.
-const BOTTOM_BLANKING: u16 = 256;
-
 /// Physical scanline at which the VCE forces the VDC into vertical sync,
 /// anchoring the vertical state machine to the raster. Matches Geargrafx's
 /// `total_lines - 4`.
@@ -934,10 +924,14 @@ impl Vdc {
             self.line_bg_y = self.registers[REG_BYR as usize] & 0x01FF;
         }
 
-        if self.v_state_line_start == VState::Vdw
-            && (TOP_BLANKING..BOTTOM_BLANKING).contains(&self.vpos)
-        {
-            let row = (self.vpos - TOP_BLANKING) as usize;
+        // Map the active line to its framebuffer row by the content line index
+        // (`raster_line`, reset to 0 when the Vdw phase opens), not by physical
+        // `vpos`. This keeps the picture aligned to the top of the framebuffer
+        // regardless of where the game's VDS positions the active window, so a
+        // large vertical-display-start (e.g. Dragon's Curse) no longer pushes
+        // the image down and clips its bottom rows.
+        if self.v_state_line_start == VState::Vdw {
+            let row = self.raster_line as usize;
             if row < FB_HEIGHT {
                 self.render_scanline(row);
             }
@@ -1094,11 +1088,11 @@ impl Vdc {
         self.line_mwr = self.registers[REG_MWR as usize];
         self.line_bxr = self.registers[REG_BXR as usize] & 0x03FF;
         self.line_bg_y = self.bg_y;
-        // Place the active line at its physical screen row (vpos - top blanking),
-        // which is what makes the picture follow `vpos` while its content follows
-        // the (separately tracked) scroll/raster counters.
-        if active && (TOP_BLANKING..BOTTOM_BLANKING).contains(&self.vpos) {
-            let row = (self.vpos - TOP_BLANKING) as usize;
+        // Place the active line at its content-line row (`raster_line`), so the
+        // picture sits at the top of the framebuffer regardless of the game's
+        // vertical-display-start position. See `render_at_hdw_start`.
+        if active {
+            let row = self.raster_line as usize;
             if row < FB_HEIGHT {
                 self.render_scanline(row);
             }
