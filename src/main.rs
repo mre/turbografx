@@ -224,6 +224,25 @@ async fn main() {
                 },
             );
         }
+
+        // F2 dumps the current frame interactively; `--screenshot` dumps a
+        // specific frame and exits so it can be driven headlessly.
+        if is_key_pressed(KeyCode::F2) {
+            let path = format!("screenshot-{frame_count}.png");
+            match save_screenshot(&path) {
+                Ok(()) => println!("Saved screenshot: {path}"),
+                Err(err) => eprintln!("Screenshot failed: {err}"),
+            }
+        }
+        if let Some(path) = options.screenshot_path.as_deref()
+            && frame_count as u32 == options.screenshot_frame
+        {
+            match save_screenshot(path) {
+                Ok(()) => println!("Saved screenshot: {path} (frame {frame_count})"),
+                Err(err) => eprintln!("Screenshot failed: {err}"),
+            }
+            break;
+        }
         frame_count = frame_count.wrapping_add(1);
 
         next_frame().await;
@@ -245,6 +264,8 @@ struct Options {
     rom_path: Option<String>,
     pad_mode: Option<PadMode>,
     shader_path: Option<String>,
+    screenshot_path: Option<String>,
+    screenshot_frame: u32,
     help: bool,
 }
 
@@ -253,6 +274,8 @@ impl Options {
         let mut rom_path = None;
         let mut pad_mode = None;
         let mut shader_path = None;
+        let mut screenshot_path = None;
+        let mut screenshot_frame = 120u32;
         let mut help = false;
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -270,6 +293,20 @@ impl Options {
                     };
                     shader_path = Some(value);
                 }
+                "--screenshot" => {
+                    let Some(value) = args.next() else {
+                        return Err(format!("{arg} requires a value"));
+                    };
+                    screenshot_path = Some(value);
+                }
+                "--screenshot-at" => {
+                    let Some(value) = args.next() else {
+                        return Err(format!("{arg} requires a value"));
+                    };
+                    screenshot_frame = value
+                        .parse()
+                        .map_err(|_| format!("{arg} expects a frame number, got {value:?}"))?;
+                }
                 "--two-button" => pad_mode = Some(PadMode::TwoButton),
                 "--six-button" => pad_mode = Some(PadMode::AvenuePad6),
                 "--avenue-pad-3-select" => pad_mode = Some(PadMode::AvenuePad3Select),
@@ -283,6 +320,8 @@ impl Options {
             rom_path,
             pad_mode,
             shader_path,
+            screenshot_path,
+            screenshot_frame,
             help,
         })
     }
@@ -303,9 +342,43 @@ fn parse_pad_mode(value: &str) -> Result<Option<PadMode>, String> {
 
 fn print_usage() {
     eprintln!(
-        "usage: turbografx [--pad auto|2|3-select|3-run|6] [--shader shader.slang|shader.slangp] [rom.pce|rom.zip]\n\
-         aliases: --two-button, --six-button, --avenue-pad-3-select, --avenue-pad-3-run"
+        "usage: turbografx [--pad auto|2|3-select|3-run|6] [--shader shader.slang|shader.slangp]\n\
+         \t[--screenshot out.png [--screenshot-at FRAME]] [rom.pce|rom.zip]\n\
+         aliases: --two-button, --six-button, --avenue-pad-3-select, --avenue-pad-3-run\n\
+         in-window: press F2 to save a screenshot to screenshot-<frame>.png"
     );
+}
+
+/// Grab the current window framebuffer and write it to `path` as a PNG. This
+/// captures exactly what is displayed, which is far more reliable than an OS
+/// screen grab when the window is on another display or space.
+#[cfg(feature = "screenshot")]
+fn save_screenshot(path: &str) -> Result<(), String> {
+    let frame = get_screen_data();
+    let width = frame.width as usize;
+    let height = frame.height as usize;
+    let stride = width * 4;
+    // `get_screen_data` returns the framebuffer bottom-up; flip the rows so the
+    // PNG is the right way up.
+    let mut flipped = vec![0u8; frame.bytes.len()];
+    for (dst_row, src_row) in (0..height).rev().enumerate() {
+        let dst = dst_row * stride;
+        let src = src_row * stride;
+        flipped[dst..dst + stride].copy_from_slice(&frame.bytes[src..src + stride]);
+    }
+    image::save_buffer(
+        path,
+        &flipped,
+        frame.width as u32,
+        frame.height as u32,
+        image::ColorType::Rgba8,
+    )
+    .map_err(|err| err.to_string())
+}
+
+#[cfg(not(feature = "screenshot"))]
+fn save_screenshot(_path: &str) -> Result<(), String> {
+    Err("screenshot support was not compiled in (rebuild with the `screenshot` feature)".to_owned())
 }
 
 fn rom_title(path: &str) -> Option<&str> {

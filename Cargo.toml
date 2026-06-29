@@ -13,12 +13,15 @@ categories = ["emulators"]
 exclude = ["roms/**", "assets/**", "shaders/**"]
 
 [features]
-default = ["std", "frontend", "zip-roms", "slang-shaders"]
+default = ["std", "frontend", "zip-roms", "slang-shaders", "screenshot"]
 std = ["alloc", "log/std"]
 alloc = []
 frontend = ["std", "dep:macroquad"]
 slang-shaders = ["frontend", "dep:glow", "dep:librashader", "dep:libloading"]
 zip-roms = ["std", "dep:zip"]
+# Save the rendered window (post-shader) to a PNG, via a hotkey or the
+# `--screenshot` CLI flag. Useful for debugging shaders headlessly.
+screenshot = ["frontend", "dep:image"]
 
 [dependencies]
 # The HuC6280 (the CPU in the TurboGrafx-16 / PC Engine) is a 65C02 derivative.
@@ -34,6 +37,8 @@ librashader = { version = "0.11.2", default-features = false, features = ["prese
 libloading = { version = "0.8", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 macroquad = { version = "0.4", optional = true }
+# Used by the `screenshot` feature to encode the captured frame as PNG.
+image = { version = "0.24", default-features = false, features = ["png"], optional = true }
 
 [[bin]]
 name = "turbografx"
