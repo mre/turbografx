@@ -132,6 +132,9 @@ fn gl_image_from_texture(
     height: u32,
 ) -> Result<GLImage, String> {
     let raw = unsafe { quad_context.texture_raw_id(texture) };
+    // `RawId` only has the `OpenGl` variant on targets without a Metal backend
+    // (e.g. Linux/Windows CI), which makes this pattern irrefutable there.
+    #[allow(irrefutable_let_patterns)]
     let RawId::OpenGl(raw) = raw else {
         return Err("slang shaders require macroquad's OpenGL backend".to_owned());
     };
