@@ -3,7 +3,7 @@
 use crate::bus::SystemBus;
 use crate::cartridge::Cartridge;
 use crate::io::{PadMode, PadState};
-use crate::vdc::{ACTIVE_HEIGHT, ACTIVE_WIDTH, FB_HEIGHT, FB_WIDTH};
+use crate::vdc::{FB_HEIGHT, FB_WIDTH};
 use alloc::vec;
 use alloc::vec::Vec;
 use mos6502::cpu::CPU;
@@ -354,24 +354,29 @@ impl Console {
             .collect()
     }
 
-    /// The active display size in pixels, `(width, height)`.
+    /// The active display size in pixels, `(width, height)`, decoded live from
+    /// the VDC's HDR/VDW timing registers. Changes when a game reprograms its
+    /// display resolution (e.g. 256x224 vs 352x240).
     #[must_use]
-    pub const fn active_size(&self) -> (usize, usize) {
-        (ACTIVE_WIDTH, ACTIVE_HEIGHT)
+    pub fn active_size(&self) -> (usize, usize) {
+        let vdc = &self.cpu.memory.vdc;
+        (vdc.display_width(), vdc.display_height())
     }
 
     /// Render the active display area as tightly-packed RGBA8 bytes
-    /// (`ACTIVE_WIDTH * ACTIVE_HEIGHT * 4`), ready to upload as a texture.
+    /// (`width * height * 4`, where the dimensions come from
+    /// [`Console::active_size`]), ready to upload as a texture.
     #[must_use]
     pub fn active_frame_rgba(&self) -> Vec<u8> {
         let vdc = &self.cpu.memory.vdc;
         let vce = &self.cpu.memory.vce;
-        let mut out = vec![0u8; ACTIVE_WIDTH * ACTIVE_HEIGHT * 4];
-        for y in 0..ACTIVE_HEIGHT {
-            for x in 0..ACTIVE_WIDTH {
+        let (width, height) = (vdc.display_width(), vdc.display_height());
+        let mut out = vec![0u8; width * height * 4];
+        for y in 0..height {
+            for x in 0..width {
                 let index = vdc.framebuffer[y * FB_WIDTH + x] as usize;
                 let argb = vce.color_argb(index);
-                let o = (y * ACTIVE_WIDTH + x) * 4;
+                let o = (y * width + x) * 4;
                 out[o] = (argb >> 16) as u8; // R
                 out[o + 1] = (argb >> 8) as u8; // G
                 out[o + 2] = argb as u8; // B

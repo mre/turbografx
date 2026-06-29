@@ -43,9 +43,13 @@ pub const VRAM_WORDS: usize = 0x8000;
 pub const FB_WIDTH: usize = 512;
 pub const FB_HEIGHT: usize = 242;
 
-/// Active display width in pixels (fixed for now; most NTSC games use 256).
+/// Nominal NTSC active display width in pixels. The real width is decoded
+/// per-frame from the HDR register (see [`Vdc::display_width`]); this remains
+/// only as a convenience default for the common 256-pixel mode.
 pub const ACTIVE_WIDTH: usize = 256;
-/// Active display height in pixels (lines `0..ACTIVE_HEIGHT` are drawn).
+/// Nominal NTSC active display height in pixels, also used to anchor the
+/// vblank line. The real height is decoded from VDW (see
+/// [`Vdc::display_height`]).
 pub const ACTIVE_HEIGHT: usize = 239;
 
 /// First scanline of vertical blanking.
@@ -1368,18 +1372,35 @@ impl Vdc {
         (width, height)
     }
 
+    /// Programmed active display width in pixels, decoded from the HDR
+    /// register's HDW field (`(HDW + 1) * 8`) and clamped to the framebuffer
+    /// width. PC Engine games pick 256, 352 or 512 by pairing this field with
+    /// the VCE dot-clock select.
+    #[must_use]
+    pub fn display_width(&self) -> usize {
+        let hdw = (self.registers[REG_HDR as usize] & 0x7F) as usize;
+        ((hdw + 1) * 8).clamp(8, FB_WIDTH)
+    }
+
+    /// Programmed active scanline count, decoded from the VDW register (which
+    /// holds `active lines - 1`) and clamped to the rendered window height.
+    #[must_use]
+    pub fn display_height(&self) -> usize {
+        let vdw = (self.registers[REG_VDW as usize] & 0x01FF) as usize;
+        (vdw + 1).clamp(1, FB_HEIGHT)
+    }
+
     /// Latched horizontal display width in pixels for the current line.
     fn line_width_pixels(&self) -> usize {
-        let hdw = (self.registers[REG_HDR as usize] & 0x7F) as usize;
-        ((hdw + 1) * 8).min(ACTIVE_WIDTH)
+        self.display_width()
     }
 
     /// Render one active scanline of palette indices into the framebuffer.
     fn render_scanline(&mut self, line: usize) {
         let cr = self.line_cr;
         let width = self.line_width_pixels();
-        let mut line_buf = [0u16; ACTIVE_WIDTH];
-        let mut bg_opaque = [false; ACTIVE_WIDTH];
+        let mut line_buf = [0u16; FB_WIDTH];
+        let mut bg_opaque = [false; FB_WIDTH];
 
         // --- Background layer -------------------------------------------------
         if cr & CR_BG_ENABLE != 0 {
@@ -1432,12 +1453,11 @@ impl Vdc {
             }
         }
 
-        // Commit the assembled line to the framebuffer.
+        // Commit the assembled line to the framebuffer. `line_buf` is the full
+        // framebuffer width and is zero beyond `width`, so a single copy clears
+        // any trailing columns from a previous wider line.
         let start = line * FB_WIDTH;
-        self.framebuffer[start..start + ACTIVE_WIDTH].copy_from_slice(&line_buf);
-        for slot in &mut self.framebuffer[start + ACTIVE_WIDTH..start + FB_WIDTH] {
-            *slot = 0;
-        }
+        self.framebuffer[start..start + FB_WIDTH].copy_from_slice(&line_buf);
     }
 
     /// Composite sprites for one scanline over the already-drawn background in
@@ -1447,13 +1467,13 @@ impl Vdc {
         &self,
         line: usize,
         display_width: usize,
-        line_buf: &mut [u16; ACTIVE_WIDTH],
-        bg_opaque: &[bool; ACTIVE_WIDTH],
+        line_buf: &mut [u16; FB_WIDTH],
+        bg_opaque: &[bool; FB_WIDTH],
     ) -> (bool, bool) {
         // First opaque sprite to touch a pixel wins (sprite 0 = highest prio).
-        let mut taken = [false; ACTIVE_WIDTH];
+        let mut taken = [false; FB_WIDTH];
         // Track sprite-0 coverage for collision detection.
-        let mut sprite0 = [false; ACTIVE_WIDTH];
+        let mut sprite0 = [false; FB_WIDTH];
         let mut on_line = 0usize;
         let mut collision = false;
         let mut overflow = false;

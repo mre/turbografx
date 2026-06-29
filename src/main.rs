@@ -178,7 +178,15 @@ async fn main() {
         return;
     }
 
-    let (w, h) = console.active_size();
+    let (mut w, mut h) = console.active_size();
+    println!("Display: {w}x{h}");
+    // The window was created at `DEFAULT_ACTIVE_HEIGHT` by `window_conf`. Only
+    // resize if this game differs, to avoid a needless resize (which on macOS
+    // loses the title-bar height from the content area).
+    if h != DEFAULT_ACTIVE_HEIGHT {
+        let (win_w, win_h) = window_dims(h);
+        request_new_screen_size(win_w as f32, win_h as f32);
+    }
     let mut shader = match options.shader_path.as_deref() {
         Some(path) => match SlangShader::load(path) {
             Ok(shader) => {
@@ -210,6 +218,19 @@ async fn main() {
 
         console.set_pad(read_pad());
         console.run_frame();
+
+        // Follow mid-game resolution changes (e.g. 256x224 menu -> 352x240
+        // gameplay): resize the window to keep the 4:3 aspect and re-create the
+        // source texture at the new dimensions.
+        let (cur_w, cur_h) = console.active_size();
+        if (cur_w, cur_h) != (w, h) {
+            w = cur_w;
+            h = cur_h;
+            println!("Display: {w}x{h}");
+            let (win_w, win_h) = window_dims(h);
+            request_new_screen_size(win_w as f32, win_h as f32);
+            texture = None;
+        }
 
         // Upload the freshly rendered frame as a texture and stretch it to the
         // window with nearest-neighbour filtering for crisp pixels.
