@@ -62,8 +62,15 @@ impl SlangShader {
         source_width: usize,
         source_height: usize,
         frame_count: usize,
+        dest: (f32, f32, f32, f32),
     ) -> Result<(), String> {
-        let output_size = (screen_width().ceil() as u32, screen_height().ceil() as u32);
+        let (dest_x, dest_y, dest_w, dest_h) = dest;
+        // The shader chain renders at the size of the (letterboxed) destination
+        // rectangle, so CRT geometry is computed for the visible 4:3 area.
+        let output_size = (
+            (dest_w.round() as u32).max(1),
+            (dest_h.round() as u32).max(1),
+        );
         self.ensure_output(output_size)?;
 
         let input_id = input.raw_miniquad_id();
@@ -114,8 +121,21 @@ impl SlangShader {
 
             // Blit librashader's output texture into the default framebuffer (the
             // window). The source FBO wraps the output texture for reading; the
-            // window is FBO 0. The destination Y range is flipped because the
-            // chain renders bottom-up while the window expects top-down.
+            // window is FBO 0. The output is placed in the centred 4:3
+            // destination rectangle; the rest of the window is cleared to black
+            // for the letterbox bars. The destination Y range is flipped because
+            // the chain renders bottom-up while the window expects top-down.
+            let screen_h = screen_height();
+            let dst_x0 = dest_x.round() as i32;
+            let dst_x1 = (dest_x + dest_w).round() as i32;
+            let dst_top = (screen_h - dest_y).round() as i32;
+            let dst_bottom = (screen_h - dest_y - dest_h).round() as i32;
+
+            self.context.bind_framebuffer(glow::FRAMEBUFFER, None);
+            self.context.disable(glow::SCISSOR_TEST);
+            self.context.clear_color(0.0, 0.0, 0.0, 1.0);
+            self.context.clear(glow::COLOR_BUFFER_BIT);
+
             let read_fbo = self
                 .context
                 .create_framebuffer()
@@ -130,18 +150,15 @@ impl SlangShader {
                 0,
             );
             self.context.bind_framebuffer(glow::DRAW_FRAMEBUFFER, None);
-            let w = output_size.0 as i32;
-            let h = output_size.1 as i32;
-            self.context.disable(glow::SCISSOR_TEST);
             self.context.blit_framebuffer(
                 0,
                 0,
-                w,
-                h,
-                0,
-                h,
-                w,
-                0,
+                output_size.0 as i32,
+                output_size.1 as i32,
+                dst_x0,
+                dst_top,
+                dst_x1,
+                dst_bottom,
                 glow::COLOR_BUFFER_BIT,
                 glow::NEAREST,
             );
@@ -168,8 +185,9 @@ impl SlangShader {
 
     /// Restrict a texture to mip level 0 so it is complete when sampled with a
     /// mipmap minification filter. macroquad-created textures only have level 0,
-    /// but librashader samples the source with a `*_MIPMAP_*` filter; macOS's
-    /// OpenGL driver otherwise rejects them as incomplete and samples black.
+    /// but both librashader and macroquad sample with `*_MIPMAP_*` filters;
+    /// macOS's OpenGL driver otherwise rejects them as incomplete and samples
+    /// black.
     fn clamp_to_base_level(&self, handle: Option<glow::NativeTexture>) {
         let Some(handle) = handle else { return };
         unsafe {

@@ -41,14 +41,42 @@ use turbografx::game_db::{pad_mode_for_title, pad_mode_name};
 use turbografx::io::{PadMode, PadState};
 use turbografx::{Cartridge, Console};
 
-/// Integer scale factor for the window (256x239 -> 768x717).
+/// Vertical integer scale factor for the window. The window height is an exact
+/// multiple of the active scanline count so scanlines stay crisp, while the
+/// width is widened to a 4:3 display aspect — the shape a PC Engine produces on
+/// a CRT. (PC Engine pixels are not square, so a 1:1-pixel window looks too
+/// narrow and distorts CRT-shader geometry.)
 const SCALE: i32 = 3;
+/// Active scanline count used to size the window.
+const DEFAULT_ACTIVE_HEIGHT: usize = 240;
+
+/// Window pixel dimensions `(width, height)` for a given active scanline count:
+/// integer vertical scale, widened to a 4:3 aspect.
+fn window_dims(active_height: usize) -> (i32, i32) {
+    let height = active_height as i32 * SCALE;
+    let width = height * 4 / 3;
+    (width, height)
+}
+
+/// Largest 4:3 rectangle `(x, y, w, h)` centred inside the given drawable. The
+/// PC Engine's picture is 4:3 regardless of its pixel resolution, so we fit it
+/// into whatever window size the OS actually grants and letterbox the rest.
+fn aspect_fit_rect(screen_w: f32, screen_h: f32) -> (f32, f32, f32, f32) {
+    let target = 4.0 / 3.0;
+    let (w, h) = if screen_w / screen_h > target {
+        (screen_h * target, screen_h)
+    } else {
+        (screen_w, screen_w / target)
+    };
+    ((screen_w - w) * 0.5, (screen_h - h) * 0.5, w, h)
+}
 
 fn window_conf() -> Conf {
+    let (width, height) = window_dims(DEFAULT_ACTIVE_HEIGHT);
     Conf {
         window_title: "TurboGrafx-16".to_owned(),
-        window_width: 256 * SCALE,
-        window_height: 239 * SCALE,
+        window_width: width,
+        window_height: height,
         // Hint the driver to disable vsync so our wall-clock frame limiter is
         // the sole pacing authority (see the main loop). This is only a hint
         // and is ignored on some platforms/macOS Metal, which is why the
@@ -202,20 +230,24 @@ async fn main() {
 
         clear_background(BLACK);
         if let Some(t) = &texture {
+            // Letterbox the picture to 4:3 inside whatever drawable the OS gave
+            // us, so the aspect is correct even if the window isn't exactly the
+            // requested size.
+            let (dx, dy, dw, dh) = aspect_fit_rect(screen_width(), screen_height());
             if let Some(shader) = shader.as_mut() {
                 // The shader chain renders and blits directly to the window.
-                if let Err(err) = shader.render(t, w, h, frame_count) {
+                if let Err(err) = shader.render(t, w, h, frame_count, (dx, dy, dw, dh)) {
                     eprintln!("Shader render failed: {err}");
                     return;
                 }
             } else {
                 draw_texture_ex(
                     t,
-                    0.0,
-                    0.0,
+                    dx,
+                    dy,
                     WHITE,
                     DrawTextureParams {
-                        dest_size: Some(vec2(screen_width(), screen_height())),
+                        dest_size: Some(vec2(dw, dh)),
                         ..Default::default()
                     },
                 );
